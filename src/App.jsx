@@ -88,15 +88,15 @@ const DEFAULT_CALENDAR = [
   makeCalRow(3,"Oreo","Q2 Launch","Meta + TikTok","2026-04-01","2026-06-30","Pending","BLS pending"),
 ];
 
-// ─── STORAGE (Supabase + LocalStorage) ────────────────────────────────────────
+// ─── STORAGE (FUERZA BRUTA) ──────────────────────────────────────────────────
 
 function usePersisted(key, defaultVal) {
   const [state, setState] = useState(defaultVal);
-  const [isLoaded, setIsLoaded] = useState(false);
 
-  // 1. CARGAR DATOS AL INICIAR (Desde Nube o Local)
+  // 1. CARGAR DATOS AL INICIAR
   useEffect(() => {
     const loadData = async () => {
+      console.log(`DEBUG: Intentando CARGAR ${key} desde la nube...`);
       try {
         const { data, error } = await supabase
           .from('os_settings')
@@ -104,45 +104,52 @@ function usePersisted(key, defaultVal) {
           .eq('user_id', 'mi_usuario_global')
           .single();
 
-        if (data && data.config && data.config[key]) {
+        if (error) {
+            console.log("DEBUG: No hay datos previos en la nube o error inicial.");
+        } else if (data && data.config && data.config[key]) {
+          console.log(`DEBUG: Datos de ${key} cargados con éxito.`);
           setState(data.config[key]);
-        } else {
-          const stored = localStorage.getItem(key);
-          if (stored) setState(JSON.parse(stored));
         }
       } catch (err) {
-        console.warn("Iniciando con datos locales/default");
-      } finally {
-        setIsLoaded(true);
+        console.error("DEBUG FATAL ERROR CARGANDO:", err);
       }
     };
     loadData();
   }, [key]);
 
-  // 2. GUARDAR DATOS (Sincronización)
+  // 2. GUARDAR DATOS (SINCRO FORZADA)
   const set = useCallback((updater) => {
     setState(prev => {
       const next = typeof updater === "function" ? updater(prev) : updater;
       
-      if (isLoaded) {
-        localStorage.setItem(key, JSON.stringify(next));
+      // Guardar localmente
+      localStorage.setItem(key, JSON.stringify(next));
+      
+      // Guardar en la nube (Fuerza Bruta)
+      const syncToCloud = async (newData) => {
+        console.log(`DEBUG: Intentando ENVIAR ${key} a Supabase...`, newData);
         
-        const syncToCloud = async (newData) => {
-          // Primero obtenemos el objeto completo de la nube para no borrar otras pestañas
-          const { data } = await supabase.from('os_settings').select('config').eq('user_id', 'mi_usuario_global').single();
-          const currentConfig = data?.config || {};
-          
-          await supabase.from('os_settings').upsert({ 
-            user_id: 'mi_usuario_global', 
-            config: { ...currentConfig, [key]: newData }, 
-            updated_at: new Date() 
-          });
-        };
-        syncToCloud(next);
-      }
+        // Obtenemos lo que hay para no pisar otras tabs
+        const { data } = await supabase.from('os_settings').select('config').eq('user_id', 'mi_usuario_global').single();
+        const currentConfig = data?.config || {};
+        
+        const { error } = await supabase.from('os_settings').upsert({ 
+          user_id: 'mi_usuario_global', 
+          config: { ...currentConfig, [key]: newData }, 
+          updated_at: new Date() 
+        });
+
+        if (error) {
+          console.error("DEBUG ERROR AL GUARDAR:", error);
+        } else {
+          console.log(`DEBUG: ${key} sincronizado correctamente.`);
+        }
+      };
+
+      syncToCloud(next);
       return next;
     });
-  }, [key, isLoaded]);
+  }, [key]);
 
   return [state, set];
 }
@@ -150,7 +157,7 @@ function usePersisted(key, defaultVal) {
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 
 function useIsMobile() {
-  const [mobile, setMobile] = useState(window.innerWidth < 640);
+  const [mobile, setMobile] = useState(typeof window !== 'undefined' ? window.innerWidth < 640 : false);
   useEffect(() => {
     const h = () => setMobile(window.innerWidth < 640);
     window.addEventListener("resize", h);
@@ -571,7 +578,7 @@ function TechnoTicketsCard({data, onChange}) {
       <div style={{display:"flex",flexDirection:"column",gap:8}}>
         {campaigns.map(camp => (
           <div key={camp.id} style={{display:"flex",alignItems:"center",gap:10,background:C.bg,borderRadius:10,padding:"12px 16px",border:`1px solid ${camp.pagado?C.green+"30":C.border}`,flexWrap:"wrap"}}>
-            <div style={{flex:1,minWidth:120}}><Inline value={camp.label} onChange={v=>updCamp(camp.id,"label",v)} placeholder="Campaign name / date" bold fontSize={13} color={camp.pagado?C.textFaint:C.text} /></div>
+            <div style={{flex:1,minWidth:120}}><Inline value={camp.label} onChange={v=>updPamp(camp.id,"label",v)} placeholder="Campaign name / date" bold fontSize={13} color={camp.pagado?C.textFaint:C.text} /></div>
             <Inline value={camp.nota} onChange={v=>updCamp(camp.id,"nota",v)} placeholder="Note…" fontSize={11} />
             <Check checked={camp.pagado} onChange={()=>updCamp(camp.id,"pagado",!camp.pagado)} label="Pagado" color={C.green} />
             <button onClick={()=>remCamp(camp.id)} style={{background:"none",border:`1px solid ${C.border}`,borderRadius:6,color:C.textFaint,cursor:"pointer",fontSize:12,padding:"3px 7px",fontFamily:MONO}}>✕</button>
